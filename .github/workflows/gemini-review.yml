@@ -1,0 +1,120 @@
+name: Gemini Code Review (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      model:
+        description: "Gemini model to use"
+        type: string
+        default: "gemini-2.0-flash"
+      max-files:
+        description: "Maximum number of changed files to review"
+        type: number
+        default: 20
+    secrets:
+      GEMINI_API_KEY:
+        required: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get changed files
+        id: diff
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+          FILES=$(git diff --name-only "$BASE" "$HEAD" \
+            | grep -v "package-lock.json" \
+            | grep -v "CHANGELOG.md" \
+            | head -${{ inputs.max-files }} \
+            | tr '\n' ' ')
+          echo "files=$FILES" >> $GITHUB_OUTPUT
+
+          DIFF=$(git diff "$BASE" "$HEAD" -- $FILES 2>/dev/null | head -c 30000 || true)
+          echo "diff<<EOF" >> $GITHUB_OUTPUT
+          echo "$DIFF" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Run Gemini review
+        id: gemini
+        run: |
+          PAYLOAD=$(python3 -c "
+          import json, sys, os
+
+          diff = os.environ.get('DIFF', '')
+          model = '${{ inputs.model }}'
+          pr_title = '${{ github.event.pull_request.title }}'
+          pr_body = '''${{ github.event.pull_request.body }}'''
+
+          prompt = f'''You are a senior engineer reviewing a pull request.
+
+          PR Title: {pr_title}
+          PR Description: {pr_body}
+
+          Review the following diff and provide:
+          1. A brief summary of what changed
+          2. Potential bugs or logic errors
+          3. Security concerns (if any)
+          4. Suggestions for improvement (keep it concise — max 5 points)
+          5. Overall verdict: LGTM / Needs minor changes / Needs major changes
+
+          Be direct and specific. Skip praise. Focus on what matters.
+
+          \`\`\`diff
+          {diff[:25000]}
+          \`\`\`
+          '''
+
+          payload = {
+            'contents': [{'parts': [{'text': prompt}]}],
+            'generationConfig': {'temperature': 0.2, 'maxOutputTokens': 1500}
+          }
+          print(json.dumps(payload))
+          ")
+
+          RESPONSE=$(curl -s \
+            "https://generativelanguage.googleapis.com/v1beta/models/${{ inputs.model }}:generateContent?key=${{ secrets.GEMINI_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD")
+
+          REVIEW=$(echo "$RESPONSE" | python3 -c "
+          import json, sys
+          data = json.load(sys.stdin)
+          try:
+            print(data['candidates'][0]['content']['parts'][0]['text'])
+          except (KeyError, IndexError) as e:
+            print(f'Gemini review failed: {e}\nResponse: {json.dumps(data, indent=2)}')
+          ")
+
+          echo "review<<EOF" >> $GITHUB_OUTPUT
+          echo "$REVIEW" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+        env:
+          DIFF: ${{ steps.diff.outputs.diff }}
+
+      - name: Post review comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const review = `${{ steps.gemini.outputs.review }}`;
+            const model = '${{ inputs.model }}';
+            const body = `## 🤖 Gemini Code Review\n\n${review}\n\n---\n_Reviewed by [${model}](https://deepmind.google/technologies/gemini/)_`;
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });

@@ -1,0 +1,48 @@
+name: Lint (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      shellcheck-dirs:
+        description: "Space-separated directories to run shellcheck on"
+        type: string
+        default: "lib"
+      shellcheck-severity:
+        description: "Minimum severity: error, warning, info, style"
+        type: string
+        default: "warning"
+      run-security-scan:
+        description: "Run hardcoded secret pattern scan"
+        type: boolean
+        default: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: ${{ inputs.shellcheck-dirs }}
+          severity: ${{ inputs.shellcheck-severity }}
+
+  security:
+    if: inputs.run-security-scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Scan for hardcoded secrets
+        run: |
+          if grep -rE "(API_KEY|SECRET|PASSWORD|TOKEN)\s*=\s*['\"][^'\"]+" \
+            --include="*.sh" --include="*.env" --include="*.yml" \
+            --exclude-dir=".git" \
+            --exclude-dir="node_modules" .; then
+            echo "Hardcoded secrets detected — failing build"
+            exit 1
+          fi
+          echo "No hardcoded secrets found"
