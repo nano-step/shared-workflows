@@ -2,6 +2,57 @@
 
 Centralised GitHub Actions reusable workflows for all `kokorolx` repos.
 
+## Add to a new repo (5 minutes)
+
+**1. Create `.github/workflows/publish-stable.yml`:**
+```yaml
+name: Publish Stable
+
+on:
+  push:
+    branches: [master]
+
+jobs:
+  publish:
+    uses: kokorolx/shared-workflows/.github/workflows/publish-stable.yml@v1
+    with:
+      package-name: "your-package-name"   # ← only thing to change
+    secrets:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+```
+
+**2. Create `.github/workflows/publish-beta.yml`:**
+```yaml
+name: Publish Beta
+
+on:
+  push:
+    branches: [beta]
+
+jobs:
+  publish:
+    uses: kokorolx/shared-workflows/.github/workflows/publish-beta.yml@v1
+    with:
+      package-name: "your-package-name"   # ← only thing to change
+    secrets:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+```
+
+**3. Create `CHANGELOG.md` (required by publish-stable):**
+```markdown
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+---
+```
+
+**4. Add `NPM_TOKEN` secret** to the repo under Settings → Secrets → Actions.
+
+That's it. Push to `master` → auto semver bump → publish → GitHub release.
+
+---
+
 ## Usage
 
 Pin to a major version tag. Never use `@main`.
@@ -156,3 +207,13 @@ Breaking changes → new major tag (`@v2`). Old major maintained for 4 weeks wit
 This repo is public. Any repo in the `kokorolx` org (or any public repo) can call these workflows.
 
 For private org repos, no extra configuration needed.
+
+---
+
+## Repos using this
+
+| Repo | publish-beta | publish-stable | lint | gemini-review |
+|---|---|---|---|---|
+| [ai-sandbox-wrapper](https://github.com/kokorolx/ai-sandbox-wrapper) | ✅ | ✅ | ✅ | — |
+| [nano-brain](https://github.com/kokorolx/nano-brain) | ✅ (`develop` branch) | ✅ | — | — |
+| [open-design-mcp](https://github.com/nano-step/open-design-mcp) | ✅ | ✅ | — | — |
