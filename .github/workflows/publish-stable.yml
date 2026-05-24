@@ -217,11 +217,11 @@ jobs:
           fi
 
           # Rebase our single bump commit on top of origin/<branch> in case
-          # another push raced us, then push branch + tag separately so the
-          # branch push can be retried independently if it loses the race.
+          # another push raced us. `--autostash` handles any leftover unstaged
+          # changes (e.g. package-lock.json touched by npm version).
           for attempt in 1 2 3; do
             git fetch origin "${BRANCH}" --quiet
-            git rebase "origin/${BRANCH}" || {
+            git rebase --autostash "origin/${BRANCH}" || {
               echo "Rebase failed on attempt ${attempt}"
               git rebase --abort || true
               exit 1
