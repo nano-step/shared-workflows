@@ -26,6 +26,10 @@ on:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
+concurrency:
+  group: publish-stable-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -196,11 +200,53 @@ jobs:
       - name: Commit version bump and push tag
         if: steps.guard.outputs.skip == 'false'
         run: |
+          set -euo pipefail
           VERSION="${{ steps.version.outputs.version }}"
+          TAG="v${VERSION}"
+          BRANCH="${GITHUB_REF#refs/heads/}"
+
           git add package.json CHANGELOG.md
-          git commit -m "chore: bump version to v${VERSION} [skip ci]"
-          git tag -a "v${VERSION}" -m "Release v${VERSION}"
-          git push origin HEAD --follow-tags
+          git commit -m "chore: bump version to ${TAG} [skip ci]"
+
+          # If a tag with this version already exists on origin (e.g. left over from
+          # a previous failed run), reuse it instead of failing. Otherwise create it.
+          git fetch origin --tags --quiet
+          if git rev-parse --verify --quiet "refs/tags/${TAG}" >/dev/null; then
+            echo "Tag ${TAG} already exists locally — skipping tag creation"
+          elif git ls-remote --exit-code --tags origin "${TAG}" >/dev/null 2>&1; then
+            echo "Tag ${TAG} already exists on origin — fetching"
+            git fetch origin "refs/tags/${TAG}:refs/tags/${TAG}"
+          else
+            git tag -a "${TAG}" -m "Release ${TAG}"
+          fi
+
+          # Rebase our single bump commit on top of origin/<branch> in case
+          # another push raced us, then push branch + tag separately so the
+          # branch push can be retried independently if it loses the race.
+          for attempt in 1 2 3; do
+            git fetch origin "${BRANCH}" --quiet
+            git rebase "origin/${BRANCH}" || {
+              echo "Rebase failed on attempt ${attempt}"
+              git rebase --abort || true
+              exit 1
+            }
+            if git push origin "HEAD:${BRANCH}"; then
+              echo "Branch push succeeded on attempt ${attempt}"
+              break
+            fi
+            if [[ ${attempt} -eq 3 ]]; then
+              echo "Branch push failed after 3 attempts"
+              exit 1
+            fi
+            echo "Branch push rejected on attempt ${attempt} — retrying after rebase"
+            sleep 2
+          done
+
+          # Push the tag last; if it already exists on origin this is a no-op.
+          git push origin "refs/tags/${TAG}" || {
+            echo "Tag push failed — verifying remote already has it"
+            git ls-remote --exit-code --tags origin "${TAG}"
+          }
 
       # ── 7. Publish to npm @latest ────────────────────────────────────────────
       - name: Publish to npm @latest

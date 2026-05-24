@@ -26,6 +26,10 @@ on:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
+concurrency:
+  group: publish-beta-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -90,12 +94,24 @@ jobs:
             const version = '${{ steps.version.outputs.beta }}';
             const pkgName = '${{ inputs.package-name }}';
             const changelog = `${{ steps.changelog.outputs.changelog }}`;
-            await github.rest.repos.createRelease({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              tag_name: `v${version}`,
-              name: `${pkgName} v${version} (beta)`,
-              body: `## Changes\n\n${changelog || '_No notable changes_'}\n\n---\n\n**Install:** \`npm install ${pkgName}@beta\``,
-              prerelease: true,
-              target_commitish: context.sha,
-            });
+            const tag = `v${version}`;
+            try {
+              await github.rest.repos.getReleaseByTag({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag,
+              });
+              console.log(`Pre-release ${tag} already exists — skipping`);
+            } catch (e) {
+              if (e.status !== 404) throw e;
+              await github.rest.repos.createRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag_name: tag,
+                name: `${pkgName} ${tag} (beta)`,
+                body: `## Changes\n\n${changelog || '_No notable changes_'}\n\n---\n\n**Install:** \`npm install ${pkgName}@beta\``,
+                prerelease: true,
+                target_commitish: context.sha,
+              });
+              console.log(`Pre-release ${tag} created`);
+            }
