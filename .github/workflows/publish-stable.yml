@@ -245,24 +245,6 @@ jobs:
           }
 
       # ── 7. Publish to npm @latest ────────────────────────────────────────────
-      - name: Diagnose npm auth (debug)
-        if: steps.guard.outputs.skip == 'false'
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
-            echo "::error::NPM_TOKEN secret is EMPTY at runtime"
-            exit 1
-          fi
-          echo "Token length: ${#NODE_AUTH_TOKEN}"
-          echo "Token prefix: ${NODE_AUTH_TOKEN:0:5}***"
-          echo "=== npm whoami ==="
-          npm whoami --registry=https://registry.npmjs.org/ || echo "whoami failed (exit $?)"
-          echo "=== HEAD package URL ==="
-          curl -sI -H "Authorization: Bearer ${NODE_AUTH_TOKEN}" \
-            "https://registry.npmjs.org/-/package/${{ inputs.package-name }}/dist-tags" \
-            | head -5
-
       - name: Publish to npm @latest
         if: steps.guard.outputs.skip == 'false'
         run: npm publish --tag latest --access public
